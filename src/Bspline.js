@@ -13,17 +13,9 @@ class Bspline{
     domain(){
         var sizeArray;
         var ret = [];
-
-        // If the reference to size is hard-coded, then the size cannot change, or
-        // if you change points manually (like by appending a point) without re-running
-        // the constructor, then it'll be incorrect. This aims for middle-ground
-        // by querying the size directly, based on the point data type
-        //
-        // A pointer to the point array-of-arrays:
         var ptr = this.points;
 
         sizeArray = ptr.shape;
-
 
         for (var d = 0; d < this.splineDimension; d++) {
           var size = sizeArray ? sizeArray[d] : ptr.length;
@@ -36,9 +28,6 @@ class Bspline{
           } else {
             ret[d] = [isClosed ? 0 : p, size];
           }
-
-          // Otherwise if it's an array of arrays, we get the size of the next
-          // dimension by recursing into the points
           if (ptr) ptr = ptr[0];
         }
         return ret;
@@ -57,25 +46,50 @@ class Bspline{
         var wOffset = this.weights.offset;
         var wStride0 = this.weights.stride[0];
         var wStride1 = this.weights.stride[1];
+        var boundary = this.boundary;
         var degree = this.degree;
-
-        var knotIndex = new Array();
-        knotIndex[0] = (t0 | 0) % size0;
-        knotIndex[1] = (t1 | 0) % size1;
+        
         var t = [t0, t1];
         var size = [size0, size1];
+        var knotIndex = new Array();
+        knotIndex[0] = (t[0] | 0); 
+        knotIndex[1] = (t[1] | 0); 
+        if(boundary[0] == 'closed') knotIndex[0] %= size[0];
+        if(boundary[1] == 'closed') knotIndex[1] %= size[1];
+        // console.log(boundary);
 
+        
 
-		    var k = new Array();
+        if(boundary[0] != 'closed') {
+            if(knotIndex[0] < degree[0]) knotIndex[0] = degree[0];
+            if(knotIndex[0] > size[0] - 1) knotIndex[0] = size[0] - 1; 
+        }
+
+        if(boundary[1] != 'closed') {
+            if(knotIndex[1] < degree[1]) knotIndex[1] = degree[1];
+            if(knotIndex[1] > size[1] - 1) knotIndex[1] = size[1] - 1; 
+        }
+
+        
+
+		var k = new Array();
         for(var i = 0; i < 2; ++i) {
             k[i] = new Array();
             for(var j = 0; j < degree[i] * 2; ++j) {
                 k[i][j] = knotIndex[i] + j + 1 - degree[i]
             }
+
+            if(boundary[i] == 'clamped') {
+                for(var j = 0; j < degree[i] * 2; ++j) {
+                    if(k[i][j] == 0) continue;
+                    if(k[i][j] < 0) k[i][j] = degree[i];
+                    else if(k[i][j] > size[i]) k[i][j] = size[i];
+                }
+            } 
         }
 
-        t[0] %= size[0];
-        t[1] %= size[1];
+        if(boundary[0] == 'closed') t[0] %= size[0];
+        if(boundary[1] == 'closed') t[1] %= size[1];
 
         var w = new Array();
         for(var i = 0; i <= degree[0]; ++i) {
@@ -101,10 +115,11 @@ class Bspline{
 
 
         for(var i = 0; i < degree[1]; ++i) {
-            for(var j = i + 1; j <= degree[1]; ++j) {
-                var isDerivative = derivative !== undefined && derivative !== null && (degree[1] - j - derivative[1] < 0)
+            for(var j = degree[1]; j >= i+1; --j) {
+                var isDerivative = derivative !== undefined && derivative !== null && (degree[1] - i - derivative[1] <= 0)
                 if(isDerivative) {
-                    var m = 1 / (k[1][j + degree[1] - 1] - k[1][j - 1])
+                    // console.log(i, j);
+                    var m = 1 / (k[1][j + degree[1] - 1 - i] - k[1][j - 1])
                     var a = (t[1] - k[1][j - 1]) * m;
                     var b = 1 - a;
                     var h = w[degree[0]][j];
@@ -115,7 +130,7 @@ class Bspline{
                         }
                     }
                 } else {
-                    var a = (t[1] - k[1][j - 1]) / (k[1][j + degree[1] - 1] - k[1][j - 1]);
+                    var a = (t[1] - k[1][j - 1]) / (k[1][j + degree[1] - 1 - i] - k[1][j - 1]);
                     var b = 1 - a;
                     for(var l = 0; l <= degree[0]; ++l) {
                         w[l][j] = b * w[l][j - 1] + a * w[l][j];
@@ -129,10 +144,11 @@ class Bspline{
 
 
         for(var i = 0; i < degree[0]; ++i) {
-            for(var j = i + 1; j <= degree[0]; ++j) {
-                var isDerivative = derivative !== undefined && derivative !== null && (degree[0] - j - derivative[0] < 0)
+            for(var j = degree[0]; j >= i+1; --j){
+                var isDerivative = derivative !== undefined && derivative !== null && (degree[0] - i - derivative[0] <= 0)
                 if(isDerivative) {
-                    var m = 1 / (k[0][j + degree[0] - 1] - k[0][j - 1]);
+                    // console.log(i, j);
+                    var m = 1 / (k[0][j + degree[0] - 1 - i] - k[0][j - 1]);
                     var a = (t[0] - k[0][j - 1]) * m;
                     var b = 1 - a;
                     var s = degree[1];
@@ -142,7 +158,7 @@ class Bspline{
                         x[j][s][z] = degree[0] * h * w[j - 1][s] / w[j][s] * (x[j][s][z] / h - x[j - 1][s][z] / w[j-1][s]) * m;
                     }
                 } else {
-                    var a = (t[0] - k[0][j - 1]) / (k[0][j + degree[0] - 1] - k[0][j - 1]);
+                    var a = (t[0] - k[0][j - 1]) / (k[0][j + degree[0] - 1 - i] - k[0][j - 1]);
                     var b = 1 - a;
                     var s = degree[1];
                     w[j][s] = b * w[j - 1][s] + a * w[j][s];
